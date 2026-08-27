@@ -6,6 +6,13 @@ Native macOS app that polls your ArgoCD server and shows watched applications wi
 
 ## Features
 
+### Settings
+<img width="661" height="618" alt="Screenshot 2026-08-27 at 12 26 00" src="https://github.com/user-attachments/assets/7980669e-237c-4cf4-a8c1-f153f65fc4cf" />
+
+### Menu Bar
+
+<img width="437" height="800" alt="image" src="https://github.com/user-attachments/assets/1ba0efdf-ab9e-4973-b894-9d30028c40fd" />
+
 - Menu bar icon with aggregate status (healthy / warning / error / unauthenticated)
 - Per-app sync and health indicators
 - Last sync time from operation or reconcile timestamp
