@@ -4,13 +4,8 @@ import SwiftUI
 
 @Observable
 final class AppSettings {
-    var endpoints: [ArgoCDEndpoint] {
-        didSet { saveEndpoints() }
-    }
-
-    var pollIntervalSeconds: Int {
-        didSet { UserDefaults.standard.set(pollIntervalSeconds, forKey: Keys.pollIntervalSeconds) }
-    }
+    var endpoints: [ArgoCDEndpoint]
+    var pollIntervalSeconds: Int
 
     var enabledEndpoints: [ArgoCDEndpoint] {
         endpoints.filter(\.isEnabled)
@@ -26,49 +21,32 @@ final class AppSettings {
             endpoints = decoded
         } else if let migrated = Self.migrateLegacySettings(from: defaults) {
             endpoints = migrated
-            Self.persistEndpoints(migrated, to: defaults)
+            Self.persist(endpoints: migrated, pollIntervalSeconds: pollIntervalSeconds, to: defaults)
         } else {
             endpoints = [ArgoCDEndpoint.placeholder()]
-            Self.persistEndpoints(endpoints, to: defaults)
+            Self.persist(
+                endpoints: endpoints,
+                pollIntervalSeconds: pollIntervalSeconds,
+                to: defaults
+            )
         }
     }
 
-    func addEndpoint() {
-        let endpoint = ArgoCDEndpoint(
-            name: "New Endpoint",
-            serverHost: "",
-            watchGroups: [WatchGroup(project: "default")]
+    func save() {
+        Self.persist(
+            endpoints: endpoints,
+            pollIntervalSeconds: pollIntervalSeconds,
+            to: UserDefaults.standard
         )
-        endpoints.append(endpoint)
     }
 
-    func removeEndpoint(id: UUID) {
-        endpoints.removeAll { $0.id == id }
-        if endpoints.isEmpty {
-            endpoints = [ArgoCDEndpoint.placeholder()]
-        }
-    }
-
-    func updateEndpoint(_ endpoint: ArgoCDEndpoint) {
-        guard let index = endpoints.firstIndex(where: { $0.id == endpoint.id }) else { return }
-        endpoints[index] = endpoint
-    }
-
-    func addWatchGroup(to endpointID: UUID) {
-        guard let index = endpoints.firstIndex(where: { $0.id == endpointID }) else { return }
-        endpoints[index].watchGroups.append(WatchGroup(project: "default"))
-    }
-
-    func removeWatchGroup(endpointID: UUID, groupID: UUID) {
-        guard let index = endpoints.firstIndex(where: { $0.id == endpointID }) else { return }
-        endpoints[index].watchGroups.removeAll { $0.id == groupID }
-        if endpoints[index].watchGroups.isEmpty {
-            endpoints[index].watchGroups = [WatchGroup(project: "default")]
-        }
-    }
-
-    private func saveEndpoints() {
-        Self.persistEndpoints(endpoints, to: UserDefaults.standard)
+    private static func persist(
+        endpoints: [ArgoCDEndpoint],
+        pollIntervalSeconds: Int,
+        to defaults: UserDefaults
+    ) {
+        persistEndpoints(endpoints, to: defaults)
+        defaults.set(pollIntervalSeconds, forKey: Keys.pollIntervalSeconds)
     }
 
     private static func persistEndpoints(_ endpoints: [ArgoCDEndpoint], to defaults: UserDefaults) {

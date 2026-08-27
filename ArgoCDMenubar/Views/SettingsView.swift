@@ -5,6 +5,8 @@ struct SettingsView: View {
     @Bindable var settings: AppSettings
     @Bindable var store: StatusStore
 
+    @State private var draftEndpoints: [ArgoCDEndpoint] = []
+    @State private var draftPollIntervalSeconds = 60
     @State private var selectedEndpointID: UUID?
     @State private var statusMessage: String?
     @State private var statusIsError = false
@@ -13,10 +15,9 @@ struct SettingsView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            if let endpoint = selectedEndpoint {
+            if let selectedIndex = selectedEndpointIndex {
                 EndpointDetailView(
-                    endpoint: endpoint,
-                    settings: settings,
+                    endpoint: $draftEndpoints[selectedIndex],
                     store: store,
                     statusMessage: $statusMessage,
                     statusIsError: $statusIsError
@@ -39,11 +40,9 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            if selectedEndpointID == nil {
-                selectedEndpointID = settings.endpoints.first?.id
-            }
+            reloadDraftFromSettings()
         }
-        .onChange(of: settings.endpoints) { _, endpoints in
+        .onChange(of: draftEndpoints) { _, endpoints in
             if let selectedEndpointID,
                !endpoints.contains(where: { $0.id == selectedEndpointID }) {
                 self.selectedEndpointID = endpoints.first?.id
@@ -55,7 +54,7 @@ struct SettingsView: View {
     private var sidebar: some View {
         List(selection: $selectedEndpointID) {
             Section("Endpoints") {
-                ForEach(settings.endpoints) { endpoint in
+                ForEach(draftEndpoints) { endpoint in
                     EndpointSidebarRow(
                         endpoint: endpoint,
                         isAuthenticated: store.isAuthenticated(for: endpoint)
@@ -64,16 +63,18 @@ struct SettingsView: View {
                 }
                 .onDelete { indexSet in
                     for index in indexSet {
-                        let id = settings.endpoints[index].id
-                        settings.removeEndpoint(id: id)
+                        draftEndpoints.remove(at: index)
+                    }
+                    if draftEndpoints.isEmpty {
+                        draftEndpoints = [ArgoCDEndpoint.placeholder()]
                     }
                 }
             }
 
             Section {
                 Stepper(
-                    "Refresh every \(settings.pollIntervalSeconds)s",
-                    value: $settings.pollIntervalSeconds,
+                    "Refresh every \(draftPollIntervalSeconds)s",
+                    value: $draftPollIntervalSeconds,
                     in: 30...300,
                     step: 15
                 )
@@ -86,8 +87,13 @@ struct SettingsView: View {
         .toolbar {
             ToolbarItem {
                 Button {
-                    settings.addEndpoint()
-                    selectedEndpointID = settings.endpoints.last?.id
+                    let endpoint = ArgoCDEndpoint(
+                        name: "New Endpoint",
+                        serverHost: "",
+                        watchGroups: [WatchGroup(project: "default")]
+                    )
+                    draftEndpoints.append(endpoint)
+                    selectedEndpointID = endpoint.id
                 } label: {
                     Label("Add endpoint", systemImage: "plus")
                 }
@@ -102,12 +108,25 @@ struct SettingsView: View {
         }
     }
 
-    private var selectedEndpoint: ArgoCDEndpoint? {
+    private var selectedEndpointIndex: Int? {
         guard let selectedEndpointID else { return nil }
-        return settings.endpoints.first { $0.id == selectedEndpointID }
+        return draftEndpoints.firstIndex { $0.id == selectedEndpointID }
+    }
+
+    private func reloadDraftFromSettings() {
+        draftEndpoints = settings.endpoints
+        draftPollIntervalSeconds = settings.pollIntervalSeconds
+        if selectedEndpointID == nil {
+            selectedEndpointID = draftEndpoints.first?.id
+        } else if !draftEndpoints.contains(where: { $0.id == selectedEndpointID }) {
+            selectedEndpointID = draftEndpoints.first?.id
+        }
     }
 
     private func applySettings() {
+        settings.endpoints = draftEndpoints
+        settings.pollIntervalSeconds = draftPollIntervalSeconds
+        settings.save()
         store.startPolling()
         Task { await store.refresh() }
         statusMessage = "Settings applied."
@@ -143,43 +162,26 @@ private struct EndpointSidebarRow: View {
 }
 
 private struct EndpointDetailView: View {
-    let endpoint: ArgoCDEndpoint
-    @Bindable var settings: AppSettings
+    @Binding var endpoint: ArgoCDEndpoint
     @Bindable var store: StatusStore
     @Binding var statusMessage: String?
     @Binding var statusIsError: Bool
 
-    @State private var draft: ArgoCDEndpoint
     @State private var isTesting = false
-
-    init(
-        endpoint: ArgoCDEndpoint,
-        settings: AppSettings,
-        store: StatusStore,
-        statusMessage: Binding<String?>,
-        statusIsError: Binding<Bool>
-    ) {
-        self.endpoint = endpoint
-        self._settings = Bindable(settings)
-        self._store = Bindable(store)
-        self._statusMessage = statusMessage
-        self._statusIsError = statusIsError
-        _draft = State(initialValue: endpoint)
-    }
 
     var body: some View {
         Form {
             Section("Server") {
-                Toggle("Enabled", isOn: $draft.isEnabled)
+                Toggle("Enabled", isOn: $endpoint.isEnabled)
 
-                TextField("Display name", text: $draft.name)
+                TextField("Display name", text: $endpoint.name)
 
-                TextField("Server host", text: $draft.serverHost)
+                TextField("Server host", text: $endpoint.serverHost)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
 
                 LabeledContent("Login command") {
-                    Text(draft.loginCommand)
+                    Text(endpoint.loginCommand)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
@@ -189,29 +191,29 @@ private struct EndpointDetailView: View {
                     Spacer()
                     Button("Copy login command") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(draft.loginCommand, forType: .string)
+                        NSPasteboard.general.setString(endpoint.loginCommand, forType: .string)
                     }
                     Button("Test connection") {
                         Task { await testConnection() }
                     }
-                    .disabled(isTesting || draft.serverHost.isEmpty || draft.watchGroups.isEmpty)
+                    .disabled(isTesting || endpoint.serverHost.isEmpty || endpoint.watchGroups.isEmpty)
                 }
             }
 
             Section {
-                ForEach($draft.watchGroups) { $group in
+                ForEach($endpoint.watchGroups) { $group in
                     WatchGroupEditor(
                         group: $group,
-                        endpoint: draft,
+                        endpoint: endpoint,
                         store: store,
-                        onRemove: draft.watchGroups.count > 1 ? {
-                            draft.watchGroups.removeAll { $0.id == group.id }
+                        onRemove: endpoint.watchGroups.count > 1 ? {
+                            endpoint.watchGroups.removeAll { $0.id == group.id }
                         } : nil
                     )
                 }
 
                 Button {
-                    draft.watchGroups.append(WatchGroup(project: "default"))
+                    endpoint.watchGroups.append(WatchGroup(project: "default"))
                 } label: {
                     Label("Add watch group", systemImage: "plus.circle")
                 }
@@ -222,18 +224,12 @@ private struct EndpointDetailView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(draft.name)
-        .onChange(of: endpoint) { _, newValue in
-            draft = newValue
-        }
-        .onChange(of: draft) { _, newValue in
-            settings.updateEndpoint(newValue)
-        }
+        .navigationTitle(endpoint.name)
     }
 
     @ViewBuilder
     private var authIndicator: some View {
-        if store.isAuthenticated(for: draft) {
+        if store.isAuthenticated(for: endpoint) {
             Label("Authenticated", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.caption)
@@ -249,17 +245,15 @@ private struct EndpointDetailView: View {
         statusMessage = nil
         defer { isTesting = false }
 
-        guard let group = draft.watchGroups.first else {
+        guard let group = endpoint.watchGroups.first else {
             statusMessage = "Add a watch group first."
             statusIsError = true
             return
         }
 
-        settings.updateEndpoint(draft)
-
         do {
-            try await store.testConnection(endpoint: draft, group: group)
-            statusMessage = "Connection to \(draft.name) successful."
+            try await store.testConnection(endpoint: endpoint, group: group)
+            statusMessage = "Connection to \(endpoint.name) successful."
             statusIsError = false
         } catch {
             statusMessage = error.localizedDescription
