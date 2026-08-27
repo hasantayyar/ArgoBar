@@ -40,6 +40,7 @@ struct ArgoCDEndpoint: Identifiable, Codable, Equatable, Hashable {
     var name: String
     var serverHost: String
     var isEnabled: Bool
+    var useSSO: Bool
     var watchGroups: [WatchGroup]
 
     init(
@@ -47,12 +48,14 @@ struct ArgoCDEndpoint: Identifiable, Codable, Equatable, Hashable {
         name: String,
         serverHost: String,
         isEnabled: Bool = true,
+        useSSO: Bool = false,
         watchGroups: [WatchGroup] = []
     ) {
         self.id = id
         self.name = name
         self.serverHost = serverHost
         self.isEnabled = isEnabled
+        self.useSSO = useSSO
         self.watchGroups = watchGroups
     }
 
@@ -61,7 +64,11 @@ struct ArgoCDEndpoint: Identifiable, Codable, Equatable, Hashable {
     }
 
     var loginCommand: String {
-        "argocd login \(serverHost)"
+        var command = "argocd login \(serverHost)"
+        if useSSO {
+            command += " --sso"
+        }
+        return command
     }
 
     func applicationURL(for appName: String) -> URL {
