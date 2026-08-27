@@ -180,6 +180,8 @@ private struct EndpointDetailView: View {
                     .textContentType(.URL)
                     .autocorrectionDisabled()
 
+                Toggle("Use SSO", isOn: $endpoint.useSSO)
+
                 LabeledContent("Login command") {
                     Text(endpoint.loginCommand)
                         .font(.system(.caption, design: .monospaced))
